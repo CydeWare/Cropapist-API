@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Crop Yield Prediction</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          sans-serif;
+        background: radial-gradient(circle at top, #293047 0, #090b11 55%);
+        color: #f7f7ff;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+
+      .app-container {
+        width: 100%;
+        max-width: 1100px;
+        background: rgba(15, 18, 32, 0.92);
+        border-radius: 18px;
+        padding: 24px 26px 26px;
+        box-shadow: 0 18px 45px rgba(0, 0, 0, 0.6);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(18px);
+      }
+
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 18px;
+        gap: 12px;
+      }
+
+      .title-block h1 {
+        font-size: 1.4rem;
+        letter-spacing: 0.04em;
+        margin-bottom: 4px;
+      }
+
+      .title-block p {
+        font-size: 0.85rem;
+        color: #c3c7dd;
+      }
+
+      .badge {
+        font-size: 0.75rem;
+        padding: 4px 10px;
+        border-radius: 999px;
+        border: 1px solid rgba(91, 207, 168, 0.35);
+        color: #5bcfa8;
+        background: rgba(35, 60, 53, 0.55);
+        white-space: nowrap;
+      }
+
+      .content {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.2fr);
+        gap: 18px;
+      }
+
+      #map {
+        height: 420px;
+        width: 100%;
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .panel {
+        background: rgba(27, 32, 55, 0.95);
+        border-radius: 14px;
+        padding: 14px 14px 16px;
+        border: 1px solid rgba(255, 255, 255, 0.04);
+      }
+
+      .panel h2 {
+        font-size: 0.95rem;
+        margin-bottom: 8px;
+        color: #f2f3ff;
+      }
+
+      .field-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+
+      .field-group label {
+        font-size: 0.83rem;
+        color: #ced1e7;
+      }
+
+      .field-group select {
+        padding: 7px 9px;
+        font-size: 0.85rem;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(12, 15, 31, 0.95);
+        color: #f7f7ff;
+        outline: none;
+      }
+
+      .field-group select:focus {
+        border-color: rgba(91, 207, 168, 0.7);
+      }
+
+      #coords {
+        font-size: 0.8rem;
+        color: #b5bad7;
+        margin-top: 2px;
+      }
+
+      .hint {
+        font-size: 0.78rem;
+        color: #8f94b8;
+        margin-bottom: 6px;
+      }
+
+      #predict-btn {
+        width: 100%;
+        padding: 9px 12px;
+        margin-top: 4px;
+        border-radius: 999px;
+        border: none;
+        background: linear-gradient(135deg, #5bcfa8, #64b5ff);
+        color: #050711;
+        font-size: 0.9rem;
+        font-weight: 600;
+        cursor: pointer;
+        letter-spacing: 0.03em;
+        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.55);
+        transition: transform 0.12s ease, box-shadow 0.12s ease,
+          filter 0.12s ease;
+      }
+
+      #predict-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 35px rgba(0, 0, 0, 0.7);
+        filter: brightness(1.05);
+      }
+
+      #predict-btn:active {
+        transform: translateY(0);
+        box-shadow: 0 5px 12px rgba(0, 0, 0, 0.7);
+        filter: brightness(0.97);
+      }
+
+      /* Loader: hidden by default */
+      #loading {
+        display: none;
+        margin-top: 8px;
+        font-size: 0.83rem;
+        color: #e3e4ff;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .spinner {
+        border: 3px solid rgba(255, 255, 255, 0.14);
+        border-top: 3px solid #5bcfa8;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        animation: spin 1s linear infinite;
+      }
+
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Result block */
+      #result-card {
+        background: rgba(12, 15, 31, 0.95);
+        padding: 14px 13px 13px;
+        border-radius: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        min-height: 82px;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease,
+          background 0.2s ease;
+      }
+
+      #result-main {
+        font-size: 1.1rem;
+        font-weight: 700;
+        margin-bottom: 6px;
+      }
+
+      #result-details {
+        font-size: 0.83rem;
+        color: #dde0ff;
+        white-space: pre-line;
+      }
+
+      .result-placeholder {
+        color: #8f94b8;
+      }
+
+      /* Category color variants */
+      .result-good {
+        border-color: rgba(91, 207, 168, 0.7);
+        box-shadow: 0 0 12px rgba(91, 207, 168, 0.28);
+      }
+
+      .result-good #result-main {
+        color: #6ff0bf;
+      }
+
+      .result-medium {
+        border-color: rgba(255, 215, 102, 0.8);
+        box-shadow: 0 0 12px rgba(255, 215, 102, 0.3);
+      }
+
+      .result-medium #result-main {
+        color: #ffe37a;
+      }
+
+      .result-bad {
+        border-color: rgba(255, 99, 132, 0.85);
+        box-shadow: 0 0 12px rgba(255, 99, 132, 0.4);
+      }
+
+      .result-bad #result-main {
+        color: #ff8ba0;
+      }
+
+      .footer-note {
+        margin-top: 6px;
+        font-size: 0.75rem;
+        color: #7d82aa;
+      }
+
+      .warning-box {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 8px;
+        background: rgba(220, 53, 69, 0.08);   /* light red background */
+        border: 1px solid rgba(220, 53, 69, 0.7);
+        color: #b02a37;                        /* dark red text */
+        font-size: 0.9rem;
+        }
+
+
+
+      @media (max-width: 900px) {
+        .content {
+          grid-template-columns: 1fr;
+        }
+
+        #map {
+          height: 320px;
+        }
+
+        .header {
+          flex-direction: column;
+          align-items: flex-start;
+        }
+
+        .badge {
+          align-self: flex-start;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-container">
+      <div class="header">
+        <div class="title-block">
+          <h1>Crop Yield Prediction</h1>
+          <p>Click on the map, choose a crop, and estimate productivity.</p>
+        </div>
+        <div class="badge">Powered by ML & Open-Meteo</div>
+      </div>
+
+      <div class="content">
+        <div id="map"></div>
+
+        <div class="sidebar">
+          <div class="panel">
+            <h2>Input</h2>
+
+            <div class="field-group">
+              <label for="crop-select">Crop</label>
+              <select id="crop-select">
+                <option value="Cassava">Cassava</option>
+                <option value="Maize">Maize</option>
+                <option value="Plantains and others">
+                  Plantains and others
+                </option>
+                <option value="Potatoes">Potatoes</option>
+                <option value="Rice, paddy">Rice, paddy</option>
+                <option value="Sorghum">Sorghum</option>
+                <option value="Soybeans">Soybeans</option>
+                <option value="Sweet potatoes">Sweet potatoes</option>
+                <option value="Wheat">Wheat</option>
+                <option value="Yams">Yams</option>
+              </select>
+            </div>
+
+            <p class="hint">
+              1) Click on the map to select the farm location.<br />
+              2) Choose the crop you want to plant.<br />
+              3) Press “Predict Yield”.
+            </p>
+
+            <div id="coords">No location selected yet.</div>
+
+            <button id="predict-btn">Predict Yield</button>
+
+            <div id="loading">
+              <div class="spinner"></div>
+              <span>Fetching weather data & running model…</span>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Prediction</h2>
+            <div id="result-card">
+              <div id="result-main" class="result-placeholder">
+                No prediction yet
+              </div>
+              <div id="result-details" class="result-placeholder">
+                Run a prediction to see yield, category, rainfall and temperature
+                here.
+              </div>
+            </div>
+            <p class="footer-note">
+              Values are estimates based on historical & seasonal weather data.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // === CONFIG: change this if your FastAPI is on another host/port ===
+      const API_URL = "http://localhost:8000/predict"
+
+      // === Map setup ===
+      const map = L.map("map", {
+  center: [0, 0],
+  zoom: 2,
+  worldCopyJump: false,   // don't jump when crossing bounds
+  maxBounds: [
+    [-90, -180],
+    [90, 180],
+  ],                      // lock view to the world box
+  maxBoundsViscosity: 1.0 // strong "rubber band" at the edges
+})
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+  noWrap: true,          // <--- this is the key: stop horizontal wrapping
+  bounds: [
+    [-90, -180],
+    [90, 180],
+  ],
+}).addTo(map)
+
+
+      const coordsEl = document.getElementById("coords")
+      const cropSelect = document.getElementById("crop-select")
+      const predictBtn = document.getElementById("predict-btn")
+      const loadingEl = document.getElementById("loading")
+
+      const resultCard = document.getElementById("result-card")
+      const resultMain = document.getElementById("result-main")
+      const resultDetails = document.getElementById("result-details")
+
+      let selectedLat = null
+      let selectedLng = null
+      let marker = null
+
+      map.on("click", (e) => {
+        selectedLat = e.latlng.lat
+        selectedLng = e.latlng.lng
+
+        // Basic range validation for Open-Meteo
+if (selectedLng < -180 || selectedLng > 180 || selectedLat < -90 || selectedLat > 90) {
+  alert("Selected coordinates are invalid for weather data (latitude must be between -90 and 90, longitude between -180 and 180). Please click on a valid location or other location.")
+  return
+}
+
+
+        coordsEl.textContent = `Selected location →  Lat: ${selectedLat.toFixed(
+          5
+        )},  Lng: ${selectedLng.toFixed(5)}`
+
+        if (marker) {
+          map.removeLayer(marker)
+        }
+        marker = L.marker([selectedLat, selectedLng]).addTo(map)
+      })
+
+      function setResultCategory(categoryLabelRaw, percentile) {
+        
+        // Remove old category classes
+        resultCard.classList.remove("result-good", "result-medium", "result-bad")
+
+        percentile = percentile.toFixed(2);
+
+        if (categoryLabelRaw === "good") {
+          resultCard.classList.add("result-good")
+          resultMain.textContent = `Good yield ${percentile}% (high expected productivity)`
+        } else if (categoryLabelRaw === "medium") {
+          resultCard.classList.add("result-medium")
+          resultMain.textContent = `Medium yield ${percentile}% (moderate productivity)`
+        } else if (categoryLabelRaw === "bad") {
+          resultCard.classList.add("result-bad")
+          resultMain.textContent = `Bad yield ${percentile}% (low expected productivity)`
+        } else {
+          // Unknown category, keep neutral style
+          resultMain.textContent = "Yield category: " + categoryLabelRaw
+        }
+      }
+
+      async function predictYield() {
+        if (selectedLat === null || selectedLng === null) {
+          alert("Please click on the map to select a location first.")
+          return
+        }
+
+        const selectedCrop = cropSelect.value
+
+        // Show loader only during API call
+        loadingEl.style.display = "flex"
+
+        // Clear placeholder style once first prediction starts
+        resultMain.classList.remove("result-placeholder")
+        resultDetails.classList.remove("result-placeholder")
+
+        try {
+        console.log(API_URL)
+          const response = await fetch(API_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              item: selectedCrop,
+              latitude: selectedLat,
+              longitude: selectedLng,
+            }),
+          })
+
+          if (!response.ok) {
+            throw new Error("Network response was not ok: " + response.status)
+          }
+
+          const data = await response.json()
+
+          const pred = data.predicted_yield
+            const category = data.yield_category
+            const avgRain = data.average_rain_fall_mm_per_year
+            const avgTemp = data.avg_temp
+            const usedYear = data.year
+            const percentile = data.yield_percentile
+            const warning = data.warning
+
+
+          setResultCategory(category, percentile)
+
+          let warningHtml = ""
+            if (warning) {
+            warningHtml = `
+                <div class="warning-box">
+                ⚠ ${warning}
+                </div>
+            `
+            }
+
+          const percentileText =
+            percentile != null
+                ? `${percentile.toFixed(1)}th percentile for ${selectedCrop}`
+                : `Percentile not available for this crop`
+
+        const detailsText = `
+        Crop: ${selectedCrop}
+        Predicted yield: ${pred.toFixed(2)} hg/ha
+        Average rainfall: ${avgRain.toFixed(2)} mm/year
+        Average temperature: ${avgTemp.toFixed(2)} °C
+        Year used for weather: ${usedYear}
+        Percentile: ${percentileText}
+        Location: ${selectedLat.toFixed(4)}, ${selectedLng.toFixed(4)}
+        ${warningHtml}
+        `.trim()
+
+          resultDetails.innerHTML = detailsText
+        } catch (err) {
+          console.error(err)
+          resultCard.classList.remove("result-good", "result-medium", "result-bad")
+          resultMain.textContent = "Error"
+          resultDetails.textContent =
+            "Error getting prediction: " + (err.message || err)
+        } finally {
+          loadingEl.style.display = "none"
+        }
+      }
+
+      predictBtn.addEventListener("click", predictYield)
+    </script>
+  </body>
+</html>
