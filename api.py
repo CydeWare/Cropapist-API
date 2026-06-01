@@ -9,6 +9,7 @@ import pandas as pd
 import pickle
 from typing import Optional
 import re
+import time
 
 
 stats_df = pd.read_csv("yield_stats_per_crop.csv", index_col="Item")
@@ -24,7 +25,8 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -82,7 +84,9 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
     warning = None
 
     url = build_url(end_date)
-    response = requests.get(url)
+    start = time.time()
+    response = requests.get(url, timeout=15)
+    print("Seasonal API took", time.time() - start, "seconds")
 
     if response.status_code == 200:
         return response.json(), end_date, None
@@ -98,7 +102,7 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
             warning = None
 
             retry_url = build_url(max_date)
-            retry_response = requests.get(retry_url)
+            retry_response = requests.get(retry_url, timeout=15)
 
             if retry_response.status_code == 200:
                 return retry_response.json(), max_date, warning
@@ -153,8 +157,23 @@ def predict_yield(payload: PredictRequest):
         "&daily=rain_sum,temperature_2m_mean&timezone=auto"
     )
 
-    archive_response = requests.get(archive_url)
-    archive_response.raise_for_status()
+    try:
+        start = time.time()
+        archive_response = requests.get(archive_url, timeout=15)
+        archive_response.raise_for_status()
+        print("Archive API took", time.time() - start, "seconds")
+
+    except Exception as e:
+        return PredictResponse(
+            predicted_yield=0.0,
+            yield_category="weather_api_error",
+            yield_percentile=None,
+            average_rain_fall_mm_per_year=0.0,
+            avg_temp=0.0,
+            year=year,
+            warning=f"Weather service unavailable: {str(e)}"
+        )
+    # archive_response.raise_for_status()
     archive_json = archive_response.json()
 
     seasonal_base = "https://seasonal-api.open-meteo.com/v1/seasonal"
