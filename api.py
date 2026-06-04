@@ -3,13 +3,14 @@ from pydantic import BaseModel
 import joblib
 import numpy as np
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import pickle
 from typing import Optional
 import re
-import time
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,6 +22,21 @@ with open("yield_percentiles_per_crop.pkl", "rb") as f:
 
 model = joblib.load("yield_model.pkl")
 label_encoder = joblib.load("item_label_encoder.pkl")
+
+
+def make_session():
+    session = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("https://", adapter)
+    return session
+
+SESSION = make_session()
+
 
 app = FastAPI()
 
@@ -82,7 +98,7 @@ def fetch_archive_cached(lat: float, lon: float, first_day_str: str, today_minus
         "&daily=rain_sum,temperature_2m_mean&timezone=auto"
     )
     print("Archive URL:", archive_url)
-    response = requests.get(archive_url, timeout=30)
+    response = SESSION.get(archive_url, timeout=30)
     response.raise_for_status()
     return response.json()
 
@@ -98,7 +114,7 @@ def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str
         )
 
     try:
-        response = requests.get(build_url(start_date, end_date), timeout=30)
+        response = SESSION.get(build_url(start_date, end_date), timeout=30)
     except requests.exceptions.RequestException:
         return None, None, "Seasonal forecast unavailable."
 
@@ -111,17 +127,16 @@ def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str
         matches = re.findall(r"\d{4}-\d{2}-\d{2}", reason)
 
         if len(matches) >= 2:
-            min_date = matches[0]  # allowed start
-            max_date = matches[1]  # allowed end
+            min_date = matches[0]
+            max_date = matches[1]
 
-            # Clamp both start and end to the allowed range
             clamped_start = max(start_date, min_date)
             clamped_end = min(end_date, max_date)
 
             if clamped_start >= clamped_end:
                 return None, None, "Seasonal forecast not available for this period."
 
-            retry_response = requests.get(build_url(clamped_start, clamped_end), timeout=30)
+            retry_response = SESSION.get(build_url(clamped_start, clamped_end), timeout=30)
             if retry_response.status_code == 200:
                 return retry_response.json(), clamped_end, None
     except Exception:
@@ -156,7 +171,6 @@ def predict_yield(payload: PredictRequest):
             warning="Invalid coordinates."
         )
 
-    # Round coordinates to 2 decimal places (~1km precision) so cache hits more often
     lat = round(payload.latitude, 2)
     lon = round(payload.longitude, 2)
 
@@ -164,7 +178,6 @@ def predict_yield(payload: PredictRequest):
     today_minus_4_str = (today - timedelta(days=4)).isoformat()
     last_day_str = date(year, 12, 31).isoformat()
 
-    # Fetch archive and seasonal in parallel
     with ThreadPoolExecutor(max_workers=2) as executor:
         archive_future = executor.submit(
             fetch_archive_cached, lat, lon, first_day_str, today_minus_4_str
