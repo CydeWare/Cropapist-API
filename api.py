@@ -13,6 +13,7 @@ from typing import Optional
 import re
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
+import time
 
 
 stats_df = pd.read_csv("yield_stats_per_crop.csv", index_col="Item")
@@ -97,8 +98,10 @@ def fetch_archive_cached(lat: float, lon: float, first_day_str: str, today_minus
         f"&start_date={first_day_str}&end_date={today_minus_4_str}"
         "&daily=rain_sum,temperature_2m_mean&timezone=auto"
     )
+    start = time.time()
     print("Archive URL:", archive_url)
     response = SESSION.get(archive_url, timeout=30)
+    print(f"Archive API took {time.time() - start:.2f}s")
     response.raise_for_status()
     return response.json()
 
@@ -114,7 +117,9 @@ def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str
         )
 
     try:
+        start = time.time()
         response = SESSION.get(build_url(start_date, end_date), timeout=30)
+        print(f"Seasonal API took {time.time() - start:.2f}s")
     except requests.exceptions.RequestException:
         return None, None, "Seasonal forecast unavailable."
 
