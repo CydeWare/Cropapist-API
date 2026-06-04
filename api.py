@@ -5,11 +5,13 @@ import numpy as np
 import requests
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd 
+import pandas as pd
 import pickle
 from typing import Optional
 import re
 import time
+from functools import lru_cache
+from concurrent.futures import ThreadPoolExecutor
 
 
 stats_df = pd.read_csv("yield_stats_per_crop.csv", index_col="Item")
@@ -25,7 +27,6 @@ app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    # allow_credentials=True,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -72,26 +73,37 @@ def classify_yield_per_crop(crop: str, predicted_yield: float):
     return category, percentile
 
 
-def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
+@lru_cache(maxsize=256)
+def fetch_archive_cached(lat: float, lon: float, first_day_str: str, today_minus_4_str: str):
+    archive_url = (
+        "https://archive-api.open-meteo.com/v1/archive"
+        f"?latitude={lat}&longitude={lon}"
+        f"&start_date={first_day_str}&end_date={today_minus_4_str}"
+        "&daily=rain_sum,temperature_2m_mean&timezone=auto"
+    )
+    print("Archive URL:", archive_url)
+    response = requests.get(archive_url, timeout=30)
+    response.raise_for_status()
+    return response.json()
+
+
+@lru_cache(maxsize=256)
+def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str):
     def build_url(e_date):
         return (
-            base_url
-            + f"?latitude={lat}&longitude={lon}"
-            + f"&start_date={start_date}&end_date={e_date}"
-            + "&daily=rain_sum,temperature_2m_mean&timezone=auto"
+            "https://seasonal-api.open-meteo.com/v1/seasonal"
+            f"?latitude={lat}&longitude={lon}"
+            f"&start_date={start_date}&end_date={e_date}"
+            "&daily=rain_sum,temperature_2m_mean&timezone=auto"
         )
-
-    warning = None
 
     url = build_url(end_date)
     print("Seasonal URL:", url)
-    start = time.time()
-    # response = requests.get(url, timeout=1000)
+
     try:
-        response = requests.get(url, timeout=1000)
+        response = requests.get(url, timeout=30)
     except requests.exceptions.RequestException:
         return None, None, "Seasonal forecast unavailable."
-    print("Seasonal API took", time.time() - start, "seconds")
 
     if response.status_code == 200:
         return response.json(), end_date, None
@@ -99,19 +111,13 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
     try:
         error_json = response.json()
         reason = error_json.get("reason", "")
-
         matches = re.findall(r"\d{4}-\d{2}-\d{2}", reason)
 
         if len(matches) >= 2:
             max_date = matches[-1]
-            warning = None
-
-            retry_url = build_url(max_date)
-            retry_response = requests.get(retry_url, timeout=15)
-
+            retry_response = requests.get(build_url(max_date), timeout=30)
             if retry_response.status_code == 200:
-                return retry_response.json(), max_date, warning
-
+                return retry_response.json(), max_date, None
     except Exception:
         pass
 
@@ -144,55 +150,37 @@ def predict_yield(payload: PredictRequest):
             warning="Invalid coordinates."
         )
 
-    first_day_of_year = date(year, 1, 1)
-    today_minus_4 = today - timedelta(days=4)
-    last_day_of_year = date(year, 12, 31)
+    # Round coordinates to 2 decimal places (~1km precision) so cache hits more often
+    lat = round(payload.latitude, 2)
+    lon = round(payload.longitude, 2)
 
-    first_day_str = first_day_of_year.isoformat()
-    today_minus_4_str = today_minus_4.isoformat()
-    last_day_str = last_day_of_year.isoformat()
+    first_day_str = date(year, 1, 1).isoformat()
+    today_minus_4_str = (today - timedelta(days=4)).isoformat()
+    last_day_str = date(year, 12, 31).isoformat()
 
-    lat = payload.latitude
-    lon = payload.longitude
-
-    archive_url = (
-        "https://archive-api.open-meteo.com/v1/archive"
-        f"?latitude={lat}&longitude={lon}"
-        f"&start_date={first_day_str}&end_date={today_minus_4_str}"
-        "&daily=rain_sum,temperature_2m_mean&timezone=auto"
-    )
-
-    print("Archive URL:", archive_url)
-
-    try:
-        archive_response = requests.get(
-            archive_url,
-            timeout=1000
+    # Fetch archive and seasonal in parallel
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        archive_future = executor.submit(
+            fetch_archive_cached, lat, lon, first_day_str, today_minus_4_str
         )
-    
-        archive_response.raise_for_status()
-        archive_json = archive_response.json()
-
-    except requests.exceptions.RequestException:
-        return PredictResponse(
-            predicted_yield=0.0,
-            yield_category="weather_unavailable",
-            yield_percentile=None,
-            average_rain_fall_mm_per_year=0.0,
-            avg_temp=0.0,
-            year=year,
-            warning="Archive weather service unavailable."
+        seasonal_future = executor.submit(
+            fetch_seasonal_cached, lat, lon, today_minus_4_str, last_day_str
         )
 
-    seasonal_base = "https://seasonal-api.open-meteo.com/v1/seasonal"
+        try:
+            archive_json = archive_future.result()
+        except requests.exceptions.RequestException:
+            return PredictResponse(
+                predicted_yield=0.0,
+                yield_category="weather_unavailable",
+                yield_percentile=None,
+                average_rain_fall_mm_per_year=0.0,
+                avg_temp=0.0,
+                year=year,
+                warning="Archive weather service unavailable."
+            )
 
-    seasonal_json, seasonal_used_end, seasonal_warning = fetch_seasonal_with_auto_limit(
-        seasonal_base,
-        lat,
-        lon,
-        today_minus_4_str,
-        last_day_str
-    )
+        seasonal_json, seasonal_used_end, seasonal_warning = seasonal_future.result()
 
     archive_rain = archive_json["daily"]["rain_sum"]
     archive_temp = archive_json["daily"]["temperature_2m_mean"]
@@ -206,7 +194,6 @@ def predict_yield(payload: PredictRequest):
 
     all_rain = [x for x in (archive_rain + seasonal_rain) if x is not None]
     all_temp = [x for x in (archive_temp + seasonal_temp) if x is not None]
-
 
     average_rain_fall_mm_per_year = float(sum(all_rain))
     avg_temp_year = float(sum(all_temp) / len(all_temp)) if all_temp else 0.0
