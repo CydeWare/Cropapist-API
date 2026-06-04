@@ -86,9 +86,9 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
     url = build_url(end_date)
     print("Seasonal URL:", url)
     start = time.time()
-    # response = requests.get(url, timeout=15)
+    # response = requests.get(url, timeout=1000)
     try:
-        response = requests.get(url, timeout=15)
+        response = requests.get(url, timeout=1000)
     except requests.exceptions.RequestException:
         return None, None, "Seasonal forecast unavailable."
     print("Seasonal API took", time.time() - start, "seconds")
@@ -167,7 +167,7 @@ def predict_yield(payload: PredictRequest):
     try:
         archive_response = requests.get(
             archive_url,
-            timeout=15
+            timeout=1000
         )
     
         archive_response.raise_for_status()
