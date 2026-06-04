@@ -89,19 +89,16 @@ def fetch_archive_cached(lat: float, lon: float, first_day_str: str, today_minus
 
 @lru_cache(maxsize=256)
 def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str):
-    def build_url(e_date):
+    def build_url(s_date, e_date):
         return (
             "https://seasonal-api.open-meteo.com/v1/seasonal"
             f"?latitude={lat}&longitude={lon}"
-            f"&start_date={start_date}&end_date={e_date}"
+            f"&start_date={s_date}&end_date={e_date}"
             "&daily=rain_sum,temperature_2m_mean&timezone=auto"
         )
 
-    url = build_url(end_date)
-    print("Seasonal URL:", url)
-
     try:
-        response = requests.get(url, timeout=30)
+        response = requests.get(build_url(start_date, end_date), timeout=30)
     except requests.exceptions.RequestException:
         return None, None, "Seasonal forecast unavailable."
 
@@ -114,10 +111,19 @@ def fetch_seasonal_cached(lat: float, lon: float, start_date: str, end_date: str
         matches = re.findall(r"\d{4}-\d{2}-\d{2}", reason)
 
         if len(matches) >= 2:
-            max_date = matches[-1]
-            retry_response = requests.get(build_url(max_date), timeout=30)
+            min_date = matches[0]  # allowed start
+            max_date = matches[1]  # allowed end
+
+            # Clamp both start and end to the allowed range
+            clamped_start = max(start_date, min_date)
+            clamped_end = min(end_date, max_date)
+
+            if clamped_start >= clamped_end:
+                return None, None, "Seasonal forecast not available for this period."
+
+            retry_response = requests.get(build_url(clamped_start, clamped_end), timeout=30)
             if retry_response.status_code == 200:
-                return retry_response.json(), max_date, None
+                return retry_response.json(), clamped_end, None
     except Exception:
         pass
 
