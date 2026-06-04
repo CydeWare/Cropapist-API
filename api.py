@@ -253,7 +253,9 @@ def predict_yield(payload: PredictRequest):
         item_encoded
     ]])
 
+    start = time.time()
     pred = model.predict(features)[0]
+    print(f"Model inference took {(time.time() - start) * 1000:.2f}ms")
     category, percentile = classify_yield_per_crop(payload.item, pred)
 
     return PredictResponse(
