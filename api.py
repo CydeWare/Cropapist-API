@@ -85,7 +85,11 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
 
     url = build_url(end_date)
     start = time.time()
-    response = requests.get(url, timeout=15)
+    # response = requests.get(url, timeout=15)
+    try:
+        response = requests.get(url, timeout=15)
+    except requests.exceptions.RequestException:
+        return None, None, "Seasonal forecast unavailable."
     print("Seasonal API took", time.time() - start, "seconds")
 
     if response.status_code == 200:
@@ -158,23 +162,24 @@ def predict_yield(payload: PredictRequest):
     )
 
     try:
-        start = time.time()
-        archive_response = requests.get(archive_url, timeout=15)
+        archive_response = requests.get(
+            archive_url,
+            timeout=15
+        )
+    
         archive_response.raise_for_status()
-        print("Archive API took", time.time() - start, "seconds")
+        archive_json = archive_response.json()
 
-    except Exception as e:
+    except requests.exceptions.RequestException:
         return PredictResponse(
             predicted_yield=0.0,
-            yield_category="weather_api_error",
+            yield_category="weather_unavailable",
             yield_percentile=None,
             average_rain_fall_mm_per_year=0.0,
             avg_temp=0.0,
             year=year,
-            warning=f"Weather service unavailable: {str(e)}"
+            warning="Archive weather service unavailable."
         )
-    # archive_response.raise_for_status()
-    archive_json = archive_response.json()
 
     seasonal_base = "https://seasonal-api.open-meteo.com/v1/seasonal"
 
