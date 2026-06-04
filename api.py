@@ -5,7 +5,7 @@ import numpy as np
 import requests
 from datetime import date, timedelta
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
+import pandas as pd 
 import pickle
 from typing import Optional
 import re
@@ -84,6 +84,7 @@ def fetch_seasonal_with_auto_limit(base_url, lat, lon, start_date, end_date):
     warning = None
 
     url = build_url(end_date)
+    print("Seasonal URL:", url)
     start = time.time()
     # response = requests.get(url, timeout=15)
     try:
@@ -160,6 +161,8 @@ def predict_yield(payload: PredictRequest):
         f"&start_date={first_day_str}&end_date={today_minus_4_str}"
         "&daily=rain_sum,temperature_2m_mean&timezone=auto"
     )
+
+    print("Archive URL:", archive_url)
 
     try:
         archive_response = requests.get(
