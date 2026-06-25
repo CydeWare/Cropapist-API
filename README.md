@@ -93,5 +93,5 @@ Cassava, Maize, Plantains and others, Potatoes, Rice (paddy), Sorghum, Soybeans,
 - **Framework** — FastAPI
 - **ML** — scikit-learn (Random Forest Regressor)
 - **Weather** — Open-Meteo Archive API + Seasonal Forecast API
-- **Deployment** — Azure App Service (Indonesia Central)
+- **Deployment** — Azure App Service (Indonesia Central) and Vercel (for frontend)
 - **Performance** — In-memory caching (`lru_cache`) and parallel weather fetching for low-latency responses
